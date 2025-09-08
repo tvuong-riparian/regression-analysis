@@ -25,8 +25,8 @@ import https from 'https'
 import { Anthropic } from '@anthropic-ai/sdk'
 import { marked } from 'marked'
 import { markedTerminal } from 'marked-terminal'
-import { keyBy, uniq, chunk } from 'lodash-es'
-import { getPullRequestDetails, getPullRequestChangedFiles, getCommitsToFile, getFileChangesInCommit } from './github.js'
+import { keyBy, uniq } from 'lodash-es'
+import { getPullRequestDetails, getPullRequestChangesSummary } from './github.js'
 import { getJiraTicketsData } from './jira.js'
 
 dotenv.config('./.env')
@@ -120,50 +120,14 @@ const anthropic = new Anthropic({
   httpAgent: httpsAgent,
 })
 
-const repo = `RiparianLLC/${process.argv[2]}`
+// Main function
+const repo = process.argv[2]
 
 const pullRequestNumber = process.argv[3]
 
-async function getPullRequestChangesSummary(repo, prNumber, baseSha) {
-  const pullRequestChangesSummary = []
-  const changedFiles = await getPullRequestChangedFiles(repo, prNumber)
-
-  const chunkedChangedFiles = chunk(changedFiles, 10)
-
-  for (const chunk of chunkedChangedFiles) {
-    await Promise.all(chunk.map(async (changedFile) => {
-      console.log(chalk.cyan(`Fetching past commits of ${changedFile.filename}`))
-
-      const pastCommits = await getCommitsToFile(repo, changedFile.filename, baseSha)
-      const currentChanges = changedFile.patch
-
-      const entry = {
-        changedFile: changedFile.filename,
-        currentChanges,
-        pastChanges: [],
-      }
-
-      for (const pastCommit of pastCommits) {
-        const pastChange = await getFileChangesInCommit(repo, changedFile.filename, pastCommit.sha)
-        const jiraTickets = pastCommit.commit.message.match(/RNA-\d+/g) || []
-
-        entry.pastChanges.push({
-          jiraTickets,
-          commitMessage: pastCommit.commit.message,
-          sha: pastCommit.sha,
-          diff: pastChange?.patch,
-        })
-      }
-
-      pullRequestChangesSummary.push(entry)
-    }))
-  }
-
-  return pullRequestChangesSummary
-}
-
 const pullRequestDetails = await getPullRequestDetails(repo, pullRequestNumber)
 
+// TODO: make regex dynamic
 const pullRequestJiraTickets = pullRequestDetails.title.match(/RNA-\d+/g) || []
 
 const pullRequestChangesSummary = await getPullRequestChangesSummary(repo, pullRequestNumber, pullRequestDetails.base.sha)
@@ -194,7 +158,7 @@ const regressionAnalysis = {
 }
 
 // Write changesSummary to a file
-const outputFileName = `anthropic-regression-analysis-${repo}-pr-${pullRequestNumber}.json`
+const outputFileName = `regression-analysis-${encodeURIComponent(repo)}-pr-${pullRequestNumber}.json`
 const outputPath = path.join(import.meta.dirname, outputFileName)
 
 try {
